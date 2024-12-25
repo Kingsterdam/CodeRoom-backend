@@ -20,10 +20,18 @@ io.on("connection", (socket) => {
 
     // Handle incoming messages
     socket.on("message", ({ room, message }) => {
-        console.log(`Message from ${socket.id} to room ${room}: ${message}`);
-        io.to(room).emit("message", { sender: socket.id, message });
+        let { name, text, time } = message; // Destructure the message object for clarity
+    
+        // Append something to the name
+        name = `${'friend of '+name}`; // Example: Appending "(appended text)" to the name
+    
+        console.log(`Message from ${name} (${socket.id}) to room ${room}: "${text}" at ${time}`);
+    
+        // Emit the modified message to all clients in the room except the sender
+        socket.to(room).emit("message", { name, text, time });
     });
-
+    
+    
     // Handle disconnection
     socket.on("disconnect", () => {
         console.log("User disconnected:", socket.id);
