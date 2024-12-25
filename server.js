@@ -13,25 +13,38 @@ io.on("connection", (socket) => {
     console.log("User connected:", socket.id);
 
     // Handle room joining
-    socket.on("joinRoom", (room) => {
+    socket.on("joinRoom", ({ room, message }) => {
+        let { type, name, time } = message;
         socket.join(room);
         console.log(`User ${socket.id} joined room: ${room}`);
+
+        socket.to(room).emit("message", { type: type, name, text: `user ${socket.id} has joined`, time });
+    });
+
+    socket.on("leaveRoom", ({ room, message }) => {
+        let { type, name, time } = message;
+        name = `${'friend of ' + name}`;
+        socket.leave(room);
+        console.log(`User ${socket.id} left room: ${room}`);
+
+        // Notify other clients in the room about the user's departure
+        socket.to(room).emit("message", { type: type, name, text: `user ${socket.id} has left`, time });
     });
 
     // Handle incoming messages
     socket.on("message", ({ room, message }) => {
         let { name, text, time } = message; // Destructure the message object for clarity
-    
+
         // Append something to the name
-        name = `${'friend of '+name}`; // Example: Appending "(appended text)" to the name
-    
+        name = `${'friend of ' + name}`; // Example: Appending "(appended text)" to the name
+
         console.log(`Message from ${name} (${socket.id}) to room ${room}: "${text}" at ${time}`);
-    
+
         // Emit the modified message to all clients in the room except the sender
         socket.to(room).emit("message", { name, text, time });
     });
-    
-    
+
+
     // Handle disconnection
     socket.on("disconnect", () => {
         console.log("User disconnected:", socket.id);
