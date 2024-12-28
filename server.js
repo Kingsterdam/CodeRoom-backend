@@ -33,7 +33,7 @@ io.on("connection", (socket) => {
 
     // Handle incoming messages
     socket.on("message", ({ room, message }) => {
-        let { name, text, time } = message; // Destructure the message object for clarity
+        let { type, name, text, time } = message; // Destructure the message object for clarity
 
         // Append something to the name
         name = `${'friend of ' + name}`; // Example: Appending "(appended text)" to the name
@@ -41,9 +41,14 @@ io.on("connection", (socket) => {
         console.log(`Message from ${name} (${socket.id}) to room ${room}: "${text}" at ${time}`);
 
         // Emit the modified message to all clients in the room except the sender
-        socket.to(room).emit("message", { name, text, time });
+        socket.to(room).emit("message", { type, name, text, time });
     });
 
+    socket.on("languageChange", ({ room, language }) => {
+        console.log(`User ${socket.id} changed language to: ${language}`);
+        // Notify other clients about the language change
+        socket.to(room).emit("languageChange", { user: socket.id, language });
+    });
 
     // Handle disconnection
     socket.on("disconnect", () => {
