@@ -33,21 +33,38 @@ io.on("connection", (socket) => {
 
     // Handle incoming messages
     socket.on("message", ({ room, message }) => {
-        let { type, name, text, time } = message; // Destructure the message object for clarity
+        let { type, name, text, time, editorId } = message; // Destructure the message object for clarity
 
         // Append something to the name
         name = `${'friend of ' + name}`; // Example: Appending "(appended text)" to the name
 
-        console.log(`Message from ${name} (${socket.id}) to room ${room}: "${text}" at ${time}`);
+        console.log("This is the message", message);
 
         // Emit the modified message to all clients in the room except the sender
-        socket.to(room).emit("message", { type, name, text, time });
+        socket.to(room).emit("message", { type, name, text, time, editorId });
     });
 
-    socket.on("languageChange", ({ room, language }) => {
-        console.log(`User ${socket.id} changed language to: ${language}`);
-        // Notify other clients about the language change
-        socket.to(room).emit("languageChange", { user: socket.id, language });
+    // In your socket server file
+    socket.on("languageUpdate", ({ room, message }) => {
+        let { type, language, editorId } = message;
+        console.log("SERVER: Received language change request");
+        console.log("SERVER: Room:", room);
+        console.log("SERVER: Language:", message);
+
+        // Broadcast the language change to all other clients in the room
+        socket.to(room.room).emit("languageUpdate", { type, language, editorId });
+        console.log("SERVER: Broadcasted language update to room");
+    });
+
+    socket.on("editorUpdate", ({ room, message }) => {
+        let { type, instruction, id } = message;
+        console.log(`SERVER: Received edit ${instruction} request`);
+        console.log("SERVER: Room:", room);
+        console.log("SERVER: ID:", id);
+
+        // Broadcast the language change to all other clients in the room
+        socket.to(room.room).emit("editorUpdate", { type, instruction, id });
+        console.log("SERVER: Broadcasted editor update to room");
     });
 
     // Handle disconnection
