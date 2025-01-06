@@ -67,6 +67,12 @@ io.on("connection", (socket) => {
         console.log("SERVER: Broadcasted editor update to room");
     });
 
+    socket.on('drawingUpdate', ({ room, data }) => {
+        console.log("SERVER: Drawing data", data);
+        console.log("room: ", room)
+        socket.to(room).emit("drawingUpdate", { data })
+    })
+
     // Handle disconnection
     socket.on("disconnect", () => {
         console.log("User disconnected:", socket.id);
