@@ -217,7 +217,26 @@ socket.on("disconnect", () => {
     });
 
     socket.on('drawingUpdate', ({ room, data }) => {
-        socket.to(room).emit("drawingUpdate", { data });
+        console.log("SERVER: Drawing data", data);
+        console.log("room: ", room)
+        socket.to(room).emit("drawingUpdate", { data })
+    })
+
+    socket.on('cursorUpdate', ({ room, data }) => {
+        console.log("SERVER: Cursor data", data);
+        console.log("room: ", room)
+        socket.to(room).emit("cursorUpdate", { data })
+    })
+
+    socket.on('cursorUpdate', ({ room, data }) => {
+        console.log("SERVER: Cursor data", data);
+        console.log("room: ", room)
+        socket.to(room).emit("cursorUpdate", { data })
+    })
+
+    // Handle disconnection
+    socket.on("disconnect", () => {
+        console.log("User disconnected:", socket.id);
     });
 });
 
