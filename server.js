@@ -1,6 +1,7 @@
 // server.js
 import { Server } from "socket.io";
 import mediasoupServer from './mediasoup-server.js';
+import msgpack from 'msgpack-lite';
 
 const io = new Server(3002, {
     cors: {
@@ -8,6 +9,7 @@ const io = new Server(3002, {
         methods: ["GET", "POST"],
         credentials: true,
     },
+    maxHttpBufferSize: 1e8 // Increase buffer size for binary data
 });
 
 // Initialize mediasoup server
@@ -16,6 +18,25 @@ await mediasoupServer.init();
 const peers = new Map();
 const rooms = new Map();
 const MAX_USERS_PER_ROOM = 20;
+
+const convertFromBinary = (binaryData) => {
+    try {
+        return msgpack.decode(binaryData);
+    } catch (error) {
+        console.error('Error decoding binary data:', error);
+        return null;
+    }
+};
+
+const convertToBinary = (data) => {
+    try {
+        return msgpack.encode(data);
+    } catch (error) {
+        console.error('Error encoding binary data:', error);
+        return null;
+    }
+};
+
 
 
 io.on("connection", async (socket) => {
@@ -36,7 +57,7 @@ io.on("connection", async (socket) => {
     socket.on('getRouterRtpCapabilities', async () => {
         let attempts = 0;
         const maxAttempts = 3;
-        
+
         const attemptConnection = async () => {
             try {
                 const router = await mediasoupServer.getRouter();
@@ -44,7 +65,7 @@ io.on("connection", async (socket) => {
             } catch (error) {
                 attempts++;
                 console.error(`Error getting router capabilities (attempt ${attempts}):`, error);
-                
+
                 if (attempts < maxAttempts) {
                     setTimeout(attemptConnection, 1000 * attempts); // Exponential backoff
                 } else {
@@ -56,7 +77,7 @@ io.on("connection", async (socket) => {
                 }
             }
         };
-        
+
         await attemptConnection();
     });
 
@@ -143,28 +164,28 @@ io.on("connection", async (socket) => {
         }
     });
 
-// Remove the duplicate disconnect handler and enhance the remaining one
-socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
-    
-    // Clean up peer data
-    const peer = peers.get(socket.id);
-    if (peer) {
-        // Clean up producers
-        peer.producers.forEach(producer => producer.close());
-        
-        // Clean up consumers
-        peer.consumers.forEach(consumer => consumer.close());
-        
-        // Clean up transports
-        if (peer.producerTransport) peer.producerTransport.close();
-        if (peer.consumerTransport) peer.consumerTransport.close();
-    }
-    
-    peers.delete(socket.id);
-    io.emit('peers', Array.from(peers.keys()));
-    mediasoupServer.removeUser(socket.id);
-});
+    // Remove the duplicate disconnect handler and enhance the remaining one
+    socket.on("disconnect", () => {
+        console.log("User disconnected:", socket.id);
+
+        // Clean up peer data
+        const peer = peers.get(socket.id);
+        if (peer) {
+            // Clean up producers
+            peer.producers.forEach(producer => producer.close());
+
+            // Clean up consumers
+            peer.consumers.forEach(consumer => consumer.close());
+
+            // Clean up transports
+            if (peer.producerTransport) peer.producerTransport.close();
+            if (peer.consumerTransport) peer.consumerTransport.close();
+        }
+
+        peers.delete(socket.id);
+        io.emit('peers', Array.from(peers.keys()));
+        mediasoupServer.removeUser(socket.id);
+    });
 
 
     socket.on("joinRoom", ({ room, message }) => {
@@ -216,28 +237,104 @@ socket.on("disconnect", () => {
         socket.to(room.room).emit("editorUpdate", { type, instruction, id });
     });
 
+    // Update the drawing handler
     socket.on('drawingUpdate', ({ room, data }) => {
-        console.log("SERVER: Drawing data", data);
-        console.log("room: ", room)
-        socket.to(room).emit("drawingUpdate", { data })
-    })
+        try {
+            console.log(room);
+            if (!data) {
+                console.error('No drawing data received');
+                return;
+            }
 
-    socket.on('cursorUpdate', ({ room, data }) => {
-        console.log("SERVER: Cursor data", data);
-        console.log("room: ", room)
-        socket.to(room).emit("cursorUpdate", { data })
-    })
+            // If data is already a Buffer or Uint8Array, broadcast it directly
 
-    socket.on('cursorUpdate', ({ room, data }) => {
-        console.log("SERVER: Cursor data", data);
-        console.log("room: ", room)
-        socket.to(room).emit("cursorUpdate", { data })
-    })
+            // Otherwise, try to encode it
+            // const binaryData = convertToBinary(data);
+            let decodedData;
+            if (data instanceof Buffer || data instanceof Uint8Array) {
+                decodedData = convertFromBinary(data);
+            }
+            console.log("SERVER: Broadcasting drawing update:", {
+                type: decodedData.t,
+                x: decodedData.p,
+                y: decodedData.s,
+                color: decodedData.w
+            });
 
-    // Handle disconnection
-    socket.on("disconnect", () => {
-        console.log("User disconnected:", socket.id);
+            socket.to(room).emit("drawingUpdate", { data });
+        
+        } catch (error) {
+            console.error("Error handling drawing update:", error);
+            socket.emit('error', {
+                type: 'DRAWING_ERROR',
+                message: error.message
+            });
+        }
     });
+    // // Single cursor update handler
+    // socket.on('cursorUpdate', ({ room, data }) => {
+    //     try {
+    //         // let decodedData;
+    //         // if (data instanceof Buffer || data instanceof Uint8Array) {
+    //         //     decodedData = convertFromBinary(data);
+    //         // } else {
+    //         //     decodedData = data;
+    //         // }
+
+    //         // if (decodedData) {
+    //         //     console.log("SERVER: Broadcasting cursor update:", {
+    //         //         type: decodedData.t,
+    //         //         x: decodedData.x,
+    //         //         y: decodedData.y,
+    //         //         name: decodedData.n,
+    //         //         color: decodedData.c
+    //         //     });
+    //         // }
+    //         // data = convertToBinary(decodedData);
+
+    //         // Convert back to binary before broadcasting
+    //         socket.to(room).emit("cursorUpdate", { data });
+    //         // }
+    //     } catch (error) {
+    //         console.error("Error handling cursor update:", error);
+    //         socket.emit('error', {
+    //             type: 'CURSOR_ERROR',
+    //             message: error.message
+    //         });
+    //     }
+    // });
+
+
+    socket.on('cursorUpdate', ({ room, data }) => {
+        try {
+            if (!room || !data) {
+                console.error('Missing room or data in cursor update');
+                return;
+            }
+            // let decodedData;
+            // if (data instanceof Buffer || data instanceof Uint8Array) {
+            //     decodedData = convertFromBinary(data);
+            // } else {
+            //     decodedData = data;
+            // }
+            // console.log("SERVER: Broadcasting cursor update:", {
+            //     type: decodedData.t,
+            //     x: decodedData.x,
+            //     y: decodedData.y,
+            //     name: decodedData.n,
+            //     color: decodedData.c});
+
+            // Forward the binary data directly to other clients
+            socket.to(room).emit("cursorUpdate", { data });
+        } catch (error) {
+            console.error("Error handling cursor update:", error);
+            socket.emit('error', {
+                type: 'CURSOR_ERROR',
+                message: error.message
+            });
+        }
+    });
+
 });
 
 console.log("Socket.IO server running on http://localhost:3002");
