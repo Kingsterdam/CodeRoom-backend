@@ -36,7 +36,7 @@ io.on("connection", async (socket) => {
     socket.on('getRouterRtpCapabilities', async () => {
         let attempts = 0;
         const maxAttempts = 3;
-        
+        // console.log("room: ", roomId)
         const attemptConnection = async () => {
             try {
                 const router = await mediasoupServer.getRouter();
@@ -44,7 +44,7 @@ io.on("connection", async (socket) => {
             } catch (error) {
                 attempts++;
                 console.error(`Error getting router capabilities (attempt ${attempts}):`, error);
-                
+
                 if (attempts < maxAttempts) {
                     setTimeout(attemptConnection, 1000 * attempts); // Exponential backoff
                 } else {
@@ -56,7 +56,7 @@ io.on("connection", async (socket) => {
                 }
             }
         };
-        
+
         await attemptConnection();
     });
 
@@ -82,22 +82,43 @@ io.on("connection", async (socket) => {
         }
     });
 
-    socket.on('produce', async ({ transportId, kind, rtpParameters }, callback) => {
+    socket.on('produce', async ({ transportId, kind, rtpParameters, roomId }, callback) => {
         try {
+            console.log(`Producing media in room: ${roomId}`);
+
+            // Verify room existence and users
+            const roomUsers = rooms.get(roomId);
+            if (!roomUsers) {
+                console.error(`Room ${roomId} does not exist`);
+                socket.emit('error', { message: 'Room does not exist' });
+                return;
+            }
+
+            console.log(`Users in room ${roomId}: ${Array.from(roomUsers)}`);
+
             const transport = mediasoupServer.getTransport(socket.id, transportId, true);
             const producer = await transport.produce({ kind, rtpParameters });
             mediasoupServer.addProducer(socket.id, producer);
 
-            // Notify all other users about the new producer
-            socket.broadcast.emit('newProducer', {
+            // Broadcast to all users in the room except the sender
+            const producerMessage = {
                 producerId: producer.id,
-                producerSocketId: socket.id
-            });
+                producerSocketId: socket.id,
+                roomId: roomId
+            };
+
+            // Use Socket.IO's room broadcasting
+            socket.broadcast.emit('newProducer', producerMessage);
+
+            console.log('New Producer Message Broadcasted to Room');
 
             callback({ producerId: producer.id });
         } catch (error) {
-            console.error('Error creating producer:', error);
-            socket.emit('error', error.message);
+            console.error('Error in produce event:', error);
+            socket.emit('error', {
+                type: 'PRODUCE_ERROR',
+                message: error.message
+            });
         }
     });
 
@@ -143,33 +164,33 @@ io.on("connection", async (socket) => {
         }
     });
 
-// Remove the duplicate disconnect handler and enhance the remaining one
-socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
-    
-    // Clean up peer data
-    const peer = peers.get(socket.id);
-    if (peer) {
-        // Clean up producers
-        peer.producers.forEach(producer => producer.close());
-        
-        // Clean up consumers
-        peer.consumers.forEach(consumer => consumer.close());
-        
-        // Clean up transports
-        if (peer.producerTransport) peer.producerTransport.close();
-        if (peer.consumerTransport) peer.consumerTransport.close();
-    }
-    
-    peers.delete(socket.id);
-    io.emit('peers', Array.from(peers.keys()));
-    mediasoupServer.removeUser(socket.id);
-});
+    // Remove the duplicate disconnect handler and enhance the remaining one
+    socket.on("disconnect", () => {
+        console.log("User disconnected:", socket.id);
+
+        // Clean up peer data
+        const peer = peers.get(socket.id);
+        if (peer) {
+            // Clean up producers
+            peer.producers.forEach(producer => producer.close());
+
+            // Clean up consumers
+            peer.consumers.forEach(consumer => consumer.close());
+
+            // Clean up transports
+            if (peer.producerTransport) peer.producerTransport.close();
+            if (peer.consumerTransport) peer.consumerTransport.close();
+        }
+
+        peers.delete(socket.id);
+        io.emit('peers', Array.from(peers.keys()));
+        mediasoupServer.removeUser(socket.id);
+    });
 
 
     socket.on("joinRoom", ({ room, message }) => {
         const currentRoom = rooms.get(room) || new Set();
-
+        console.log(`User joined: `, message, room)
         if (currentRoom.size >= MAX_USERS_PER_ROOM) {
             socket.emit('error', {
                 type: 'ROOM_FULL',
@@ -182,24 +203,27 @@ socket.on("disconnect", () => {
         rooms.set(room, currentRoom);
         socket.join(room);
 
-        let { type, name, time } = message;
+        let { type, name, time, email } = message;
+        console.log("Socket id: ", socket.id)
         socket.to(room).emit("message", {
             type: type,
+            email,
             name,
-            text: `user ${socket.id} has joined`,
+            text: `${name} has joined`,
             time
         });
     });
 
     socket.on("leaveRoom", ({ room, message }) => {
-        let { type, name, time } = message;
-        name = `${'friend of ' + name}`;
+        let { type, name, time, email } = message;
+        // name = `${'friend of ' + name}`;
         socket.leave(room);
-        console.log(`User ${socket.id} left room: ${room}`);
-        socket.to(room).emit("message", { type: type, name, text: `user ${socket.id} has left`, time });
+        console.log(`${name} left room: ${room}`);
+        socket.to(room).emit("message", { type: type, name, email, text: `${name} has left`, time });
     });
 
     socket.on("message", ({ room, message }) => {
+        console.log("room in message: ", room)
         let { type, name, text, time, editorId } = message;
         name = `${'friend of ' + name}`;
         console.log("This is the message", message);
@@ -232,6 +256,16 @@ socket.on("disconnect", () => {
         console.log("SERVER: Cursor data", data);
         console.log("room: ", room)
         socket.to(room).emit("cursorUpdate", { data })
+    })
+
+    socket.on('muteUpdate', ({ room, data }) => {
+        console.log("Received mute message", data);
+        socket.to(room).emit("muteUpdate", { data })
+    })
+
+    socket.on('removeUser', ({ room, data }) => {
+        console.log("Received remove message: ", data);
+        socket.to(room).emit("removeUser", { data })
     })
 
     // Handle disconnection
