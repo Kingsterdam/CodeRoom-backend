@@ -100,14 +100,14 @@ io.on("connection", async (socket) => {
             const producer = await transport.produce({ kind, rtpParameters });
             mediasoupServer.addProducer(socket.id, producer);
 
-            // Broadcast to all users in the room except the sender
+            // Broadcast to all users in the SAME room
             const producerMessage = {
                 producerId: producer.id,
                 producerSocketId: socket.id,
                 roomId: roomId
             };
 
-            // Use Socket.IO's room broadcasting
+            // Broadcast only to users in the same room
             socket.broadcast.emit('newProducer', producerMessage);
 
             console.log('New Producer Message Broadcasted to Room');
