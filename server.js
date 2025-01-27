@@ -1,6 +1,8 @@
 // server.js
 import { Server } from "socket.io";
 import mediasoupServer from './mediasoup-server.js';
+import RoomProducerManager from './roomProducerManager.js';
+const roomProducerManager = new RoomProducerManager();
 
 const io = new Server(3002, {
     cors: {
@@ -84,33 +86,20 @@ io.on("connection", async (socket) => {
 
     socket.on('produce', async ({ transportId, kind, rtpParameters, roomId }, callback) => {
         try {
-            console.log(`Producing media in room: ${roomId}`);
-
-            // Verify room existence and users
-            const roomUsers = rooms.get(roomId);
-            if (!roomUsers) {
-                console.error(`Room ${roomId} does not exist`);
-                socket.emit('error', { message: 'Room does not exist' });
-                return;
-            }
-
-            console.log(`Users in room ${roomId}: ${Array.from(roomUsers)}`);
-
+            console.log("inside the produce event", roomId, socket.id, transportId, kind, rtpParameters);
             const transport = mediasoupServer.getTransport(socket.id, transportId, true);
             const producer = await transport.produce({ kind, rtpParameters });
             mediasoupServer.addProducer(socket.id, producer);
 
-            // Broadcast to all users in the room except the sender
-            const producerMessage = {
+            // Add producer to room tracking
+            roomProducerManager.addProducerToRoom(roomId, producer.id, socket.id);
+
+            // Only emit to users in the same room
+            socket.broadcast.emit('newProducer', {
                 producerId: producer.id,
                 producerSocketId: socket.id,
                 roomId: roomId
-            };
-
-            // Use Socket.IO's room broadcasting
-            socket.broadcast.emit('newProducer', producerMessage);
-
-            console.log('New Producer Message Broadcasted to Room');
+            });
 
             callback({ producerId: producer.id });
         } catch (error) {
@@ -122,23 +111,33 @@ io.on("connection", async (socket) => {
         }
     });
 
-    socket.on('consume', async ({ producerId, rtpCapabilities, transportId }) => {
+
+    socket.on('consume', async ({ producerId, rtpCapabilities, transportId, roomId }) => {
         try {
+            // Verify producer is in the same room
+            const roomProducers = roomProducerManager.getProducersInRoom(roomId);
+            const validProducer = roomProducers.find(p => p.producerId === producerId);
+            
+            if (!validProducer) {
+                console.log('Producer not found in room');
+                return;
+            }
+    
             const router = await mediasoupServer.getRouter();
             const transport = mediasoupServer.getTransport(socket.id, transportId, false);
-
+    
             if (!router.canConsume({ producerId, rtpCapabilities })) {
                 throw new Error('Cannot consume the producer');
             }
-
+    
             const consumer = await transport.consume({
                 producerId,
                 rtpCapabilities,
                 paused: true
             });
-
+    
             mediasoupServer.addConsumer(socket.id, consumer);
-
+    
             socket.emit('consumerCreated', {
                 consumerId: consumer.id,
                 producerId: consumer.producerId,
@@ -147,7 +146,7 @@ io.on("connection", async (socket) => {
                 type: consumer.type,
                 producerPaused: consumer.producerPaused
             });
-
+    
         } catch (error) {
             console.error('Error creating consumer:', error);
             socket.emit('error', error.message);
@@ -168,16 +167,14 @@ io.on("connection", async (socket) => {
     socket.on("disconnect", () => {
         console.log("User disconnected:", socket.id);
 
-        // Clean up peer data
+        // Remove from room-producer tracking
+        roomProducerManager.removeUserFromAllRooms(socket.id);
+
+        // Existing cleanup code...
         const peer = peers.get(socket.id);
         if (peer) {
-            // Clean up producers
             peer.producers.forEach(producer => producer.close());
-
-            // Clean up consumers
             peer.consumers.forEach(consumer => consumer.close());
-
-            // Clean up transports
             if (peer.producerTransport) peer.producerTransport.close();
             if (peer.consumerTransport) peer.consumerTransport.close();
         }
