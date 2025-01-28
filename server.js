@@ -82,7 +82,7 @@ io.on("connection", async (socket) => {
         }
     });
 
-    socket.on('produce', async ({ transportId, kind, rtpParameters, roomId }, callback) => {
+    socket.on('produce', async ({ transportId, kind, rtpParameters, roomId, email }, callback) => {
         try {
             console.log(`Producing media in room: ${roomId}`);
 
@@ -104,9 +104,10 @@ io.on("connection", async (socket) => {
             const producerMessage = {
                 producerId: producer.id,
                 producerSocketId: socket.id,
-                roomId: roomId
+                sendersRoomId: roomId,
+                senderEmail: email
             };
-
+            console.log("Producer message: ", producerMessage)
             // Broadcast only to users in the same room
             socket.broadcast.emit('newProducer', producerMessage);
 
@@ -122,8 +123,9 @@ io.on("connection", async (socket) => {
         }
     });
 
-    socket.on('consume', async ({ producerId, rtpCapabilities, transportId }) => {
+    socket.on('consume', async ({ producerId, rtpCapabilities, transportId, consumerEmail }) => {
         try {
+            console.log(`creating a consumer for ${consumerEmail}`)
             const router = await mediasoupServer.getRouter();
             const transport = mediasoupServer.getTransport(socket.id, transportId, false);
 
